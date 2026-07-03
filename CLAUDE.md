@@ -4,13 +4,19 @@
 
 ## 系統拓撲
 
-純前端、無後端、無部署：`index.html`（單一檔案）＋ `content/current-week.js`（題庫）→ 直接以 `file://` 雙擊開啟於 Chrome/Edge。練習紀錄在 localStorage（key 前綴 `sc_`）。改 `index.html` 存檔即生效，重新整理頁面就好，**沒有任何部署步驟**。
+純前端 PWA：`index.html`（單一檔案）＋ `content/current-week.js`（題庫）＋ `manifest.webmanifest`/`sw.js`/`icons/`（PWA 三件套）。
+
+- **正式入口 = GitHub Pages**：https://jenniferliang813-netizen.github.io/speaking-coach/ （repo：`jenniferliang813-netizen/speaking-coach`，main branch 根目錄直接發佈，**`git push` 即部署**，約 1 分鐘生效）。
+- 使用者主要在**手機**用（加入主畫面當 App）。練習紀錄在 localStorage（key 前綴 `sc_`），每台裝置各自獨立。
+- **`file://` 直開不能用麥克風**（瀏覽器封鎖），App 會顯示警告 banner。所以**任何改動都要 push 才算交付**。
+- Service worker（`sw.js`）網路優先、離線退快取；改版若沒生效，請使用者完全關閉 App 重開。快取名 `sc-v1`，改 SHELL 清單時記得升版本號。
 
 ## 檔案地圖
 
 | 檔案 | 職責 |
 |---|---|
 | `BUILD_SPEC.md` | **真相來源**：App 完整規格（Schema、評分規則、驗收條件）。改功能前先讀它、改完同步更新它 |
+| `manifest.webmanifest` / `sw.js` / `icons/` | PWA：安裝資訊、離線快取、App 圖示（icons 由 PowerShell System.Drawing 生成） |
 | `daily-speaking-coach-spec.md` | 最初需求藍圖（歷史文件，已被 BUILD_SPEC 取代，難度已依 A2-B1 下修） |
 | `index.html` | App 本體（HTML+CSS+JS 全包，禁外部依賴） |
 | `content/current-week.js` | 本週題庫，`window.WEEK_DATA`。每週由 generate-week 流程覆寫（舊的先存成 `archive-<週次>.js`） |
@@ -21,6 +27,7 @@
 
 ## 已踩過的坑（別再踩）
 
+0. **`file://` 直開時瀏覽器封鎖麥克風**（getUserMedia 與語音辨識都拿不到權限）——使用者 2026-07-03 實測「電腦上無法收到聲音」的根因。解法＝走 GitHub Pages（HTTPS）。不要再教使用者雙擊 index.html。
 1. **`file://` 下 `fetch()` 本地 JSON 會被瀏覽器擋** → 題庫改用 `<script src>` 載入 `.js` 檔（`window.WEEK_DATA`）。任何新資料檔都要走這個模式，不要用 fetch。
 2. **Windows Chrome 常沒有 en-IE 語音** → App 已做退回 en-GB 的防線。改 TTS 相關功能時保留這個 fallback。
 3. **`webkitSpeechRecognition` 與 `MediaRecorder` 併用可能搶麥克風** → 規格要求辨識優先、錄音失敗自動停用。動麥克風流程時別破壞這個防線。
@@ -41,7 +48,8 @@
 - 使用者已決策：完整鷹架（字幕+句型卡+提示鈕+慢速重播，WPM 目標 80–120）；加跟讀、streak、錄音回放、自動難度；腔調預設 en-GB、2026-08-01 起自動轉 en-IE（手動設定優先）；週日複習=重練本週最低分原情境。
 - 第一週題庫 `2026-W27` 已建（9 情境，difficulty 1–2，我=Fable 5 親自寫的，A2-B1 分級）。
 - `index.html` 完工並驗收通過（sonnet 實作、Fable 5 逐項驗收：實際瀏覽器跑過首頁/暖身/設定/週日複習/缺檔錯誤頁，console 乾淨；無麥克風環境按鈕不拋例外）。麥克風鈕支援「按住說話」與「點一下切換」雙模式（350ms 閾值，Fable 5 修正）。
-- 已知未驗項（需真人實機）：TTS 實際發聲、真麥克風辨識、錄音回放、辨識+錄音併用防線。使用者第一次實測時留意。
+- 已知未驗項（需真人實機）：TTS 實際發聲、真麥克風辨識、錄音回放、辨識+錄音併用防線。設定頁有「🔊 測試教練聲音」按鈕輔助 debug。
+- 2026-07-03 晚：已 PWA 化並部署 GitHub Pages（見系統拓撲）。使用者回報 file:// 模式收不到聲音 → 根因是瀏覽器封鎖，已用線上版解決＋加警告 banner。
 - `.claude/launch.json` 是測試用 dev server 設定（`py -m http.server 8123`），日常使用不需要它。
 
 ## Backlog（提過或預留的方向）
@@ -51,7 +59,8 @@
 
 ## 測試 / 驗證（改 index.html 後必跑）
 
-1. `file://` 直開不白屏；把 `content/current-week.js` 暫時改名，確認顯示友善錯誤頁後改回來。
-2. `?day=1`（週一=醫學）與 `?day=0`（週日=複習）主題正確。
+1. 抽出 `<script>` 內容跑 `node --check`（見常用操作）。
+2. 本機 preview（`.claude/launch.json` 的 `py -m http.server 8123`）：`?day=1`（週一=醫學）與 `?day=0`（週日=複習）主題正確。
 3. 開 DevTools Console：從首頁點到成績單一輪，無紅字錯誤（無麥克風環境按鈕也不能拋例外）。
-4. 產新題庫後：`node --check` 過、且 App 重新整理後能載入新週次。
+4. **push 後開正式網址確認生效**（SW 快取關係，可能要強制重新整理）。
+5. 產新題庫後：`node --check` 過、push、線上版載入新週次。

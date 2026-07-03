@@ -29,6 +29,11 @@
    - 新內容覆寫 `content/current-week.js`（格式：`window.WEEK_DATA = {...};`，week 欄位填新週次）。
    - 把新情境的 id/title **追加**進 `content/_used.json`。
 6. **驗證**：用 `node --check`（或等效方式）確認 current-week.js 語法正確；列出每個情境的 id / theme / difficulty / grammarFocus 給使用者過目。
+7. **推上 GitHub**（手機吃的是線上版，不 push 手機看不到新題目）：
+   ```
+   git add content/ && git commit -m "content: week <週次>" && git pull --rebase && git push
+   ```
+   push 完提醒使用者：手機把 App 完全關掉重開（或重新整理）就會載入新題庫。
 
 ## 品質紅線
 
