@@ -1,0 +1,14 @@
+{
+  "note": "已出過的情境清單，每週產生新內容時讀取以避免重複。產生完新一週要把新情境追加進來。",
+  "used": [
+    { "id": "med-2026w27-01", "title": "Presenting a patient at morning rounds" },
+    { "id": "med-2026w27-02", "title": "Talking to a patient before anesthesia" },
+    { "id": "med-2026w27-03", "title": "Answering a question after your talk" },
+    { "id": "talk-2026w27-01", "title": "Coffee break at a conference" },
+    { "id": "talk-2026w27-02", "title": "Talking about your weekend" },
+    { "id": "talk-2026w27-03", "title": "Telling people about Taiwan" },
+    { "id": "trav-2026w27-01", "title": "Checking in at a hotel" },
+    { "id": "trav-2026w27-02", "title": "Ordering food at a restaurant" },
+    { "id": "trav-2026w27-03", "title": "Taking a taxi in Dublin" }
+  ]
+}
