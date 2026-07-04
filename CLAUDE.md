@@ -9,7 +9,8 @@
 - **正式入口 = GitHub Pages**：https://jenniferliang813-netizen.github.io/speaking-coach/ （repo：`jenniferliang813-netizen/speaking-coach`，main branch 根目錄直接發佈，**`git push` 即部署**，約 1 分鐘生效）。
 - 使用者主要在**手機**用（加入主畫面當 App）。練習紀錄在 localStorage（key 前綴 `sc_`），每台裝置各自獨立。
 - **`file://` 直開不能用麥克風**（瀏覽器封鎖），App 會顯示警告 banner。所以**任何改動都要 push 才算交付**。
-- Service worker（`sw.js`）網路優先、離線退快取；改版若沒生效，請使用者完全關閉 App 重開。快取名 `sc-v1`，改 SHELL 清單時記得升版本號。
+- Service worker（`sw.js`）網路優先、離線退快取。**PWA 快取會卡舊版**（2026-07-04 實測：使用者手機一直跑舊版辨識邏輯，回報「還是重複」其實是沒更新到）。已加自救機制：SW install 用 `no-store` 抓核心檔、fetch 對 html/js/webmanifest 繞 HTTP 快取、新 SW 裝好時 `controllerchange` 自動 reload 一次。**首頁右下角顯示版本號 `APP_VERSION`（index.html）＝ `sw.js` 的 `CACHE` 版本，改版兩者同步升**；用它確認手機跑哪版。
+- **改版驗證看版本號**：改 index.html/sw.js → 升 APP_VERSION＋CACHE → push → 部署後在**手機**確認首頁角落版本號變新，才算使用者真的拿到。別只信桌面 preview。
 
 ## 檔案地圖
 

@@ -436,6 +436,7 @@
 /* ======================================================================
    0. 基礎工具與常數
 ====================================================================== */
+var APP_VERSION = "v7";   // 顯示在首頁角落；改版時同步 sw.js 的 CACHE 版本，方便確認手機是否更新
 var LS_PREFIX = "sc_";
 var LS_HISTORY = LS_PREFIX + "history";
 var LS_LEVEL = LS_PREFIX + "level";
@@ -1383,7 +1384,7 @@ function renderDashboard(){
   }
   html += '</div>';
 
-  html += '<footer class="small-note">單機 App · 資料僅存於此裝置瀏覽器</footer>';
+  html += '<footer class="small-note">單機 App · 資料僅存於此裝置瀏覽器 · ' + APP_VERSION + '</footer>';
 
   appEl.innerHTML = html;
 
@@ -2055,7 +2056,28 @@ function init(){
     appEl.parentNode.insertBefore(banner, appEl);
   }
   if("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")){
-    try{ navigator.serviceWorker.register("sw.js"); }catch(e){}
+    try{
+      // 新版 SW 接管時自動刷新一次，讓手機不用手動關開兩次就吃到新版（PWA 快取常卡舊版）
+      var reloadedForUpdate = false;
+      navigator.serviceWorker.addEventListener("controllerchange", function(){
+        if(reloadedForUpdate) return;
+        reloadedForUpdate = true;
+        location.reload();
+      });
+      navigator.serviceWorker.register("sw.js").then(function(reg){
+        try{ reg.update(); }catch(e){}
+        // 若已有等待中的新版，立刻請它接管
+        function promote(w){ if(w) try{ w.postMessage("skip-waiting"); }catch(e){} }
+        if(reg.waiting) promote(reg.waiting);
+        reg.addEventListener("updatefound", function(){
+          var nw = reg.installing;
+          if(!nw) return;
+          nw.addEventListener("statechange", function(){
+            if(nw.state === "installed" && navigator.serviceWorker.controller) promote(nw);
+          });
+        });
+      }).catch(function(){});
+    }catch(e){}
   }
   if(!hasWeekData()){
     renderErrorPage();
