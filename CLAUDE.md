@@ -34,9 +34,10 @@
 5. **Android 對非連續辨識的停頓極敏感**（句中停一下就截斷）＋**啟動延遲會吃掉開頭幾個字**＋ **confidence 常回傳 0** → `micFlow` 已改連續模式（continuous + interimResults、onstart 才提示開始說話、conf 0 當缺值）。改辨識流程時不要退回單次模式。
 6. **連續模式下 Android 會把同一句的遞增內容分散在不同槽位反覆回報**（"could"→"could I"→"could I have"…），造成重複串接。試過純拼接、result 索引覆蓋都無效（遞增版本落在不同 index）。**最終解＝區分 interim / final 兩種處理**：
    - **interim**（即時猜測，遞增回報的來源）用 `mergeWords` 單字層級前後重疊去重收斂（找 base 尾與 add 頭最長重疊、只接新增字）。
-   - **final**（已確認段）用 `appendFinal`：**預設保留、不去重**，只丟棄「完全沒帶新字的純冗餘重送」。因為 final 段間的字面重疊多半是使用者真的重複/口吃（"I will, I will call..."、"very very good"）——opus 對抗審查指出：一律去重會靜默吃掉初學者的合法重複、掩蓋要練的毛病、拉低 WPM。
+   - **final**（已確認段）**也用 `mergeWords` 去重**。⚠️ 2026-07-04 實機（Samsung Android）截圖鐵證：這台的 final 段是「逐字從頭遞增重報」（good→good evening→good evening welcome→…每段+1字都是 final），**不是**互斥增量。曾一度聽 opus 審查假設「final 互斥、去重會誤刪合法重複」改成 appendFinal（不去重），結果實機整段重複、40 分——**已撤銷**。
+   - 為何 mergeWords 不會誤刪合法重複：逐字重報會經過中間段（"I will"→"I will I"→"I will I will"→…），mergeWords 尾頭重疊會保留雙字；只有辨識器「跳躍式」把重複切兩段才會漏，實機逐字遞增故不跳躍。
    - **deliver**：有 final 就信任 final；只有整段沒 final（放開太快）才用 interim 兜底。**不把 interim merge 進 final**，避免 interim 中途錯字（如把 fifteen 誤判 fifty）污染結果（醫學數字情境要命）。
-   改辨識流程時保留這個 interim/final 分工，別讓 final 也去重。驗證：`merge_test2.js` 9 案例（Node 模擬，含原 bug 收斂＋P1 合法重複保留＋P3 數字不污染）；**非實機**，實機行為以使用者回報為準。
+   改辨識流程時：final 與 interim 都用 mergeWords，deliver 別把 interim 併進 final。回歸測試＝專案根 `tests-mic-dedup.js`（`node tests-mic-dedup.js`，8 案例，含實機確切序列＋兩種 Android index 模式＋P1 合法重複＋P3 數字不污染）。**教訓：辨識器實際行為以實機截圖為準，不要靠審查者或我的理論假設。**
 4. 資料夾在 Google Drive 同步區 → 通用同步坑見 `~/.claude/PITFALLS.md`。
 
 ## 常用操作

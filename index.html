@@ -701,19 +701,10 @@ function micFlow(onResult, onError, onStatus){
     }
     return baseWords.concat(add.slice(best));
   }
-  // 併入一段「已確認(final)」內容：與 interim 不同，final 段之間預設「保留」而非去重——
-  // 因為遞增回報幾乎只發生在 interim；final 段間的字面重疊多半是使用者真的重複/口吃
-  // （"I will, I will call..."、"very very good"），去重會靜默吃掉，掩蓋要練的毛病。
-  // 僅當這段完全沒帶新字（純冗餘重送）才丟棄。
-  function appendFinal(baseWords, addStr){
-    var add = String(addStr || "").trim().split(/\s+/).filter(Boolean);
-    if(!add.length) return baseWords;
-    if(!baseWords.length) return add.slice();
-    // 若去重後長度沒增加，代表 add 整段都被 base 尾端涵蓋 = 純重複回報，丟棄
-    if(mergeWords(baseWords, addStr).length === baseWords.length) return baseWords;
-    // 否則完整拼接，不去重，保留可能的合法重複
-    return baseWords.concat(add);
-  }
+  // final 段也用 mergeWords 去重：實機（Samsung Android）證實 final 段是「逐字從頭遞增
+  // 重報」（good→good evening→good evening welcome→…），不是互斥增量，所以必須去重收斂。
+  // 合法重複不會被誤刪，因為逐字重報會經過中間段（"I will I will"），mergeWords 的尾頭
+  // 重疊會保留它——只有辨識器「跳躍式」把重複切成兩段才會漏，實機是逐字遞增故不會跳躍。
   function combinedConfidence(){
     if(!confList.length) return 0.75;   // Android 常缺值 → 中性分，不當作發音差
     var sum = 0;
@@ -753,7 +744,7 @@ function micFlow(onResult, onError, onStatus){
         var txt = (alt.transcript || "").trim();
         if(!txt) continue;
         if(res.isFinal){
-          committedWords = appendFinal(committedWords, txt);
+          committedWords = mergeWords(committedWords, txt);
           if(typeof alt.confidence === "number" && alt.confidence > 0){ confList.push(alt.confidence); }
           working = committedWords.slice();
         } else {
