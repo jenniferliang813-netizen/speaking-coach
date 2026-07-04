@@ -31,7 +31,8 @@
 1. **`file://` 下 `fetch()` 本地 JSON 會被瀏覽器擋** → 題庫改用 `<script src>` 載入 `.js` 檔（`window.WEEK_DATA`）。任何新資料檔都要走這個模式，不要用 fetch。
 2. **Windows Chrome 常沒有 en-IE 語音** → App 已做退回 en-GB 的防線。改 TTS 相關功能時保留這個 fallback。
 3. **`webkitSpeechRecognition` 與 `MediaRecorder` 併用會搶麥克風**——Android 2026-07-03 實測「偶爾錄得到但部分缺失／顯示沒偵測到聲音」的根因之一 → 手機一律不啟動錄音（`isMobileDevice` 判斷），桌機保留辨識優先＋錯誤自動停用防線。
-5. **Android 對非連續辨識的停頓極敏感**（句中停一下就截斷）＋**啟動延遲會吃掉開頭幾個字**＋ **confidence 常回傳 0** → `micFlow` 已改連續模式（continuous + interimResults、累積片段、onstart 才提示開始說話、conf 0 當缺值）。改辨識流程時不要退回單次模式。
+5. **Android 對非連續辨識的停頓極敏感**（句中停一下就截斷）＋**啟動延遲會吃掉開頭幾個字**＋ **confidence 常回傳 0** → `micFlow` 已改連續模式（continuous + interimResults、onstart 才提示開始說話、conf 0 當缺值）。改辨識流程時不要退回單次模式。
+6. **連續模式下 Android 會反覆回報同一段的「遞增完整內容」**（"I"→"I have"→"I have a reservation"），若用 push 累積會串成 "I I have I have a reservation..." → `micFlow` 已改用 **result 絕對索引覆蓋**（`resultSlots[i]`）而非 push，同一段無論回報幾次只占一槽。deliver 優先取 final、沒 final 用 interim 兜底。不要改回 push。
 4. 資料夾在 Google Drive 同步區 → 通用同步坑見 `~/.claude/PITFALLS.md`。
 
 ## 常用操作

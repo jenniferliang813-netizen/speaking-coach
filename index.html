@@ -643,11 +643,12 @@ var currentAudioBlobUrl = null;
 function micFlow(onResult, onError, onStatus){
   // onResult(transcriptText, confidence, durationSec)
   // onStatus(type, text)："ready"=辨識器真正開始聽了、"interim"=即時逐字稿
-  // 連續模式：句中停頓不會截斷，累積所有 final 片段，停止時合併交回
+  // 連續模式：句中停頓不會截斷。用「辨識器結果索引」覆蓋儲存，避免 Android 反覆
+  // 回報同一段的遞增完整內容（"I"→"I have"→...）被當成多段而重複串接。
   var recognizer = null;
   var finished = false;
   var listenStart = null;   // 真正開始聽的時間（WPM 用，避免把啟動延遲算進語速）
-  var finalSegments = [];   // { text, conf }
+  var resultSlots = [];     // 依 result index 覆蓋：resultSlots[i] = { text, conf, isFinal }
 
   function notify(type, text){
     if(onStatus){ try{ onStatus(type, text); }catch(e){} }
@@ -677,20 +678,35 @@ function micFlow(onResult, onError, onStatus){
 
   var recorderStarted = false;
 
-  function combinedTranscript(){
-    return finalSegments.map(function(s){ return s.text; }).join(" ").replace(/\s+/g, " ").trim();
+  function joinSlots(finalOnly){
+    var parts = [];
+    for(var i = 0; i < resultSlots.length; i++){
+      var s = resultSlots[i];
+      if(!s || !s.text) continue;
+      if(finalOnly && !s.isFinal) continue;
+      parts.push(s.text);
+    }
+    return parts.join(" ").replace(/\s+/g, " ").trim();
+  }
+  function hasAnyText(){
+    for(var i = 0; i < resultSlots.length; i++){
+      if(resultSlots[i] && resultSlots[i].text) return true;
+    }
+    return false;
   }
   function combinedConfidence(){
-    // Android 常回傳 confidence 0 或缺值，只平均「真的有值」的片段，都沒有就用中性值
+    // Android 常回傳 confidence 0 或缺值，只平均「真的有值」的 final 片段，都沒有就用中性值
     var sum = 0, n = 0;
-    finalSegments.forEach(function(s){
-      if(typeof s.conf === "number" && s.conf > 0){ sum += s.conf; n++; }
-    });
+    for(var i = 0; i < resultSlots.length; i++){
+      var s = resultSlots[i];
+      if(s && s.isFinal && typeof s.conf === "number" && s.conf > 0){ sum += s.conf; n++; }
+    }
     return n ? (sum / n) : 0.75;
   }
   function deliver(){
     stopRecorderIfNeeded();
-    var text = combinedTranscript();
+    // 優先取已確認(final)內容；若使用者說完立刻放開、尚未 final 化，退回含 interim 的內容兜底
+    var text = joinSlots(true) || joinSlots(false);
     if(!text){
       finishOnce(function(){ onError("no-speech"); });
       return;
@@ -706,31 +722,26 @@ function micFlow(onResult, onError, onStatus){
   };
   recognizer.onresult = function(event){
     try{
-      var interim = "";
+      // 依 result 的絕對索引「覆蓋」寫入：同一段語音無論被回報幾次都只占一個槽位，
+      // 因此 Android 反覆送來的遞增完整內容不會被重複串接。
       for(var i = event.resultIndex; i < event.results.length; i++){
         var res = event.results[i];
         var alt = res[0];
         if(!alt) continue;
-        if(res.isFinal){
-          var t = (alt.transcript || "").trim();
-          if(t){
-            finalSegments.push({
-              text: t,
-              conf: (typeof alt.confidence === "number") ? alt.confidence : 0
-            });
-          }
-        } else {
-          interim += alt.transcript || "";
-        }
+        resultSlots[i] = {
+          text: (alt.transcript || "").trim(),
+          conf: (typeof alt.confidence === "number") ? alt.confidence : 0,
+          isFinal: !!res.isFinal
+        };
       }
-      var live = (combinedTranscript() + " " + interim).replace(/\s+/g, " ").trim();
+      var live = joinSlots(false);
       if(live) notify("interim", live);
     }catch(e){}
   };
   recognizer.onerror = function(event){
     var err = event && event.error ? event.error : "unknown";
-    // 已經累積到內容的 no-speech / aborted 不算失敗，把內容交出去
-    if(finalSegments.length && (err === "no-speech" || err === "aborted")){
+    // 已經收到內容的 no-speech / aborted 不算失敗，把內容交出去
+    if(hasAnyText() && (err === "no-speech" || err === "aborted")){
       deliver();
       return;
     }
