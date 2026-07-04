@@ -631,18 +631,27 @@ var mediaRecorderSupported = (typeof MediaRecorder !== "undefined") && navigator
 
 var recordingDisabledPermanently = safeGetLS(LS_RECORD_DISABLED, false);
 
+// 手機上 MediaRecorder 與語音辨識會搶麥克風（Android 實測：辨識部分缺失或收不到），
+// 所以行動裝置一律不啟動錄音，只留桌機。
+var isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+
 // 錄音回放用的物件, 只存在記憶體
 var currentRecorder = null;
 var currentRecordedChunks = [];
 var currentAudioBlobUrl = null;
 
-function micFlow(onResult, onError){
+function micFlow(onResult, onError, onStatus){
   // onResult(transcriptText, confidence, durationSec)
-  // 啟動辨識 + (若允許) 錄音
-  var startTime = Date.now();
+  // onStatus(type, text)："ready"=辨識器真正開始聽了、"interim"=即時逐字稿
+  // 連續模式：句中停頓不會截斷，累積所有 final 片段，停止時合併交回
   var recognizer = null;
   var finished = false;
+  var listenStart = null;   // 真正開始聽的時間（WPM 用，避免把啟動延遲算進語速）
+  var finalSegments = [];   // { text, conf }
 
+  function notify(type, text){
+    if(onStatus){ try{ onStatus(type, text); }catch(e){} }
+  }
   function finishOnce(fn){
     if(finished) return;
     finished = true;
@@ -662,24 +671,69 @@ function micFlow(onResult, onError){
   }
 
   recognizer.lang = currentAccent();
-  recognizer.interimResults = false;
+  recognizer.continuous = true;      // 句中停頓不結束（Android 對非連續模式的停頓極度敏感）
+  recognizer.interimResults = true;  // 即時回傳，讓使用者看到自己說的字
   recognizer.maxAlternatives = 1;
 
   var recorderStarted = false;
 
+  function combinedTranscript(){
+    return finalSegments.map(function(s){ return s.text; }).join(" ").replace(/\s+/g, " ").trim();
+  }
+  function combinedConfidence(){
+    // Android 常回傳 confidence 0 或缺值，只平均「真的有值」的片段，都沒有就用中性值
+    var sum = 0, n = 0;
+    finalSegments.forEach(function(s){
+      if(typeof s.conf === "number" && s.conf > 0){ sum += s.conf; n++; }
+    });
+    return n ? (sum / n) : 0.75;
+  }
+  function deliver(){
+    stopRecorderIfNeeded();
+    var text = combinedTranscript();
+    if(!text){
+      finishOnce(function(){ onError("no-speech"); });
+      return;
+    }
+    var durationSec = Math.max(0.4, (Date.now() - (listenStart || Date.now())) / 1000);
+    var conf = combinedConfidence();
+    finishOnce(function(){ onResult(text, conf, durationSec); });
+  }
+
+  recognizer.onstart = function(){
+    listenStart = Date.now();
+    notify("ready");
+  };
   recognizer.onresult = function(event){
     try{
-      var res = event.results[event.results.length - 1];
-      var transcript = res[0].transcript || "";
-      var confidence = (typeof res[0].confidence === "number") ? res[0].confidence : 0.75;
-      var durationSec = Math.max(0.4, (Date.now() - startTime) / 1000);
-      stopRecorderIfNeeded();
-      finishOnce(function(){ onResult(transcript, confidence, durationSec); });
-    }catch(e){
-      finishOnce(function(){ onError("parse-error"); });
-    }
+      var interim = "";
+      for(var i = event.resultIndex; i < event.results.length; i++){
+        var res = event.results[i];
+        var alt = res[0];
+        if(!alt) continue;
+        if(res.isFinal){
+          var t = (alt.transcript || "").trim();
+          if(t){
+            finalSegments.push({
+              text: t,
+              conf: (typeof alt.confidence === "number") ? alt.confidence : 0
+            });
+          }
+        } else {
+          interim += alt.transcript || "";
+        }
+      }
+      var live = (combinedTranscript() + " " + interim).replace(/\s+/g, " ").trim();
+      if(live) notify("interim", live);
+    }catch(e){}
   };
   recognizer.onerror = function(event){
+    var err = event && event.error ? event.error : "unknown";
+    // 已經累積到內容的 no-speech / aborted 不算失敗，把內容交出去
+    if(finalSegments.length && (err === "no-speech" || err === "aborted")){
+      deliver();
+      return;
+    }
     // 相容性防線：若錄音同時開啟導致 recognition error，關閉錄音功能並記住
     if(recorderStarted && state.settings.recordEnabled && !recordingDisabledPermanently){
       recordingDisabledPermanently = true;
@@ -689,11 +743,11 @@ function micFlow(onResult, onError){
       showToast("此裝置不支援同時錄音，已自動關閉錄音回放");
     }
     stopRecorderIfNeeded();
-    finishOnce(function(){ onError(event && event.error ? event.error : "unknown"); });
+    finishOnce(function(){ onError(err); });
   };
   recognizer.onend = function(){
-    stopRecorderIfNeeded();
-    finishOnce(function(){ onError("no-speech"); });
+    // 不論是使用者停止還是瀏覽器自己結束：有內容就交內容，沒內容才算 no-speech
+    deliver();
   };
 
   function stopRecorderIfNeeded(){
@@ -704,8 +758,8 @@ function micFlow(onResult, onError){
     }catch(e){}
   }
 
-  // 嘗試同時錄音（僅供回放，辨識優先）
-  if(mediaRecorderSupported && state.settings.recordEnabled && !recordingDisabledPermanently){
+  // 嘗試同時錄音（僅供回放，辨識優先；手機一律跳過，避免搶麥克風）
+  if(!isMobileDevice && mediaRecorderSupported && state.settings.recordEnabled && !recordingDisabledPermanently){
     try{
       navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream){
         try{
@@ -1344,8 +1398,10 @@ function renderSettings(){
   html += '<input type="number" id="wpm-max" value="' + s.wpmMax + '" style="width:80px;padding:8px;border-radius:8px;border:1px solid var(--border);">';
   html += '</div></div>';
 
-  html += '<div class="settings-row"><div class="switch-row"><label>錄音回放</label><div class="switch ' + (s.recordEnabled?"on":"") + '" id="sw-record"><div class="knob"></div></div></div>';
-  if(recordingDisabledPermanently){
+  html += '<div class="settings-row"><div class="switch-row"><label>錄音回放</label><div class="switch ' + (s.recordEnabled && !isMobileDevice ?"on":"") + '" id="sw-record"><div class="knob"></div></div></div>';
+  if(isMobileDevice){
+    html += '<div style="font-size:12px;color:var(--text-sub);">手機不支援錄音回放（會與語音辨識搶麥克風），此功能僅電腦可用</div>';
+  } else if(recordingDisabledPermanently){
     html += '<div style="font-size:12px;color:var(--text-sub);">此裝置先前偵測到不支援同時錄音，已自動關閉</div>';
   }
   html += '</div>';
@@ -1383,6 +1439,10 @@ function renderSettings(){
   });
   var swRecord = document.getElementById("sw-record");
   swRecord.addEventListener("click", function(){
+    if(isMobileDevice){
+      showToast("手機不支援錄音回放（會與語音辨識搶麥克風）");
+      return;
+    }
     if(recordingDisabledPermanently){
       showToast("此裝置已偵測為不支援同時錄音，無法重新開啟");
       return;
@@ -1515,7 +1575,7 @@ function renderWarmup(){
     }
   }, function(errType){
     handleMicError(errType, document.getElementById("warmup-feedback"));
-  });
+  }, "warmup-transcript");
 }
 
 /* ======================================================================
@@ -1626,7 +1686,7 @@ function renderTurn(){
     renderTurnFeedback(scoreResult, turn, idx);
   }, function(errType){
     handleMicError(errType, document.getElementById("turn-feedback"));
-  });
+  }, "turn-transcript");
 }
 
 function renderTurnFeedback(scoreResult, turn, idx){
@@ -1679,7 +1739,7 @@ function renderTurnFeedback(scoreResult, turn, idx){
 /* ======================================================================
    20. 麥克風按鈕綁定（按住/點擊皆可）
 ====================================================================== */
-function bindMicButton(btnEl, onResult, onError){
+function bindMicButton(btnEl, onResult, onError, liveBoxId){
   if(!btnEl) return;
   var active = false;
   var controller = null;
@@ -1687,27 +1747,51 @@ function bindMicButton(btnEl, onResult, onError){
   var toggleMode = false;   // 快速點一下進入切換模式：持續收音直到下一次點擊
   var justStopped = false;  // 切換模式的第二次點擊已停止，忽略緊接著的放開事件
 
+  var hintEl = document.getElementById("mic-hint");
+  var defaultHint = hintEl ? hintEl.textContent : "";
+  function setHint(text, active){
+    if(!hintEl) return;
+    hintEl.textContent = text;
+    hintEl.style.color = active ? "var(--teal-dark)" : "";
+    hintEl.style.fontWeight = active ? "700" : "";
+  }
+  function onStatus(type, text){
+    if(type === "ready"){
+      setHint("🎙 請開始說話…", true);
+    } else if(type === "interim" && liveBoxId){
+      var box = document.getElementById(liveBoxId);
+      if(box){
+        box.style.display = "block";
+        box.textContent = text;
+      }
+    }
+  }
+
   function startMic(){
     if(active) return;
     active = true;
     toggleMode = false;
     btnEl.classList.add("recording");
+    setHint("⏳ 麥克風啟動中…", true);
     try{
       controller = micFlow(function(transcript, confidence, durationSec){
         active = false;
         toggleMode = false;
         btnEl.classList.remove("recording");
+        setHint(defaultHint, false);
         onResult(transcript, confidence, durationSec);
       }, function(errType){
         active = false;
         toggleMode = false;
         btnEl.classList.remove("recording");
+        setHint(defaultHint, false);
         onError(errType);
-      });
+      }, onStatus);
     }catch(e){
       active = false;
       toggleMode = false;
       btnEl.classList.remove("recording");
+      setHint(defaultHint, false);
       onError("exception");
     }
   }

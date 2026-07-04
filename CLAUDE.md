@@ -30,7 +30,8 @@
 0. **`file://` 直開時瀏覽器封鎖麥克風**（getUserMedia 與語音辨識都拿不到權限）——使用者 2026-07-03 實測「電腦上無法收到聲音」的根因。解法＝走 GitHub Pages（HTTPS）。不要再教使用者雙擊 index.html。
 1. **`file://` 下 `fetch()` 本地 JSON 會被瀏覽器擋** → 題庫改用 `<script src>` 載入 `.js` 檔（`window.WEEK_DATA`）。任何新資料檔都要走這個模式，不要用 fetch。
 2. **Windows Chrome 常沒有 en-IE 語音** → App 已做退回 en-GB 的防線。改 TTS 相關功能時保留這個 fallback。
-3. **`webkitSpeechRecognition` 與 `MediaRecorder` 併用可能搶麥克風** → 規格要求辨識優先、錄音失敗自動停用。動麥克風流程時別破壞這個防線。
+3. **`webkitSpeechRecognition` 與 `MediaRecorder` 併用會搶麥克風**——Android 2026-07-03 實測「偶爾錄得到但部分缺失／顯示沒偵測到聲音」的根因之一 → 手機一律不啟動錄音（`isMobileDevice` 判斷），桌機保留辨識優先＋錯誤自動停用防線。
+5. **Android 對非連續辨識的停頓極敏感**（句中停一下就截斷）＋**啟動延遲會吃掉開頭幾個字**＋ **confidence 常回傳 0** → `micFlow` 已改連續模式（continuous + interimResults、累積片段、onstart 才提示開始說話、conf 0 當缺值）。改辨識流程時不要退回單次模式。
 4. 資料夾在 Google Drive 同步區 → 通用同步坑見 `~/.claude/PITFALLS.md`。
 
 ## 常用操作
