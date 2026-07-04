@@ -701,6 +701,19 @@ function micFlow(onResult, onError, onStatus){
     }
     return baseWords.concat(add.slice(best));
   }
+  // 併入一段「已確認(final)」內容：與 interim 不同，final 段之間預設「保留」而非去重——
+  // 因為遞增回報幾乎只發生在 interim；final 段間的字面重疊多半是使用者真的重複/口吃
+  // （"I will, I will call..."、"very very good"），去重會靜默吃掉，掩蓋要練的毛病。
+  // 僅當這段完全沒帶新字（純冗餘重送）才丟棄。
+  function appendFinal(baseWords, addStr){
+    var add = String(addStr || "").trim().split(/\s+/).filter(Boolean);
+    if(!add.length) return baseWords;
+    if(!baseWords.length) return add.slice();
+    // 若去重後長度沒增加，代表 add 整段都被 base 尾端涵蓋 = 純重複回報，丟棄
+    if(mergeWords(baseWords, addStr).length === baseWords.length) return baseWords;
+    // 否則完整拼接，不去重，保留可能的合法重複
+    return baseWords.concat(add);
+  }
   function combinedConfidence(){
     if(!confList.length) return 0.75;   // Android 常缺值 → 中性分，不當作發音差
     var sum = 0;
@@ -710,8 +723,10 @@ function micFlow(onResult, onError, onStatus){
   function hasContent(){ return committedWords.length > 0 || !!lastLive; }
   function deliver(){
     stopRecorderIfNeeded();
-    // 以 final 為主；把最後的 interim 也去重合併進來（救回只出現在 interim 的尾字，如 please）
-    var finalWords = lastLive ? mergeWords(committedWords.slice(), lastLive) : committedWords.slice();
+    // 有已確認(final)內容就信任它；只有在完全沒 final（放開太快、整段沒確認）時，
+    // 才退回 interim 兜底。避免 interim 中途的錯字/回退（如把 fifteen 誤判 fifty）污染結果。
+    var finalWords = committedWords.length ? committedWords.slice()
+                   : (lastLive ? lastLive.split(/\s+/).filter(Boolean) : []);
     var text = finalWords.join(" ").trim();
     if(!text){
       finishOnce(function(){ onError("no-speech"); });
@@ -738,7 +753,7 @@ function micFlow(onResult, onError, onStatus){
         var txt = (alt.transcript || "").trim();
         if(!txt) continue;
         if(res.isFinal){
-          committedWords = mergeWords(committedWords, txt);
+          committedWords = appendFinal(committedWords, txt);
           if(typeof alt.confidence === "number" && alt.confidence > 0){ confList.push(alt.confidence); }
           working = committedWords.slice();
         } else {
