@@ -1,6 +1,6 @@
 /* Service Worker：網路優先、離線退回快取。
    注意：語音辨識本身需要網路（瀏覽器把聲音送雲端辨識），離線模式只保證頁面打得開。 */
-var CACHE = "sc-v3";
+var CACHE = "sc-v4";
 var SHELL = [
   "./",
   "./index.html",

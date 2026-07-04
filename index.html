@@ -643,12 +643,15 @@ var currentAudioBlobUrl = null;
 function micFlow(onResult, onError, onStatus){
   // onResult(transcriptText, confidence, durationSec)
   // onStatus(type, text)："ready"=辨識器真正開始聽了、"interim"=即時逐字稿
-  // 連續模式：句中停頓不會截斷。用「辨識器結果索引」覆蓋儲存，避免 Android 反覆
-  // 回報同一段的遞增完整內容（"I"→"I have"→...）被當成多段而重複串接。
+  // 連續模式：句中停頓不會截斷。Android 會把同一句的遞增內容（"could"→"could I"→
+  // "could I have"…）分散在不同槽位反覆回報，故不能單純拼接或靠索引覆蓋——改用
+  // 「單字層級的前後重疊去重合併」：合併每段時，偵測與現有內容的最長重疊，只接新增的字。
   var recognizer = null;
   var finished = false;
   var listenStart = null;   // 真正開始聽的時間（WPM 用，避免把啟動延遲算進語速）
-  var resultSlots = [];     // 依 result index 覆蓋：resultSlots[i] = { text, conf, isFinal }
+  var committedWords = [];  // 已確認(final)內容，逐段去重合併
+  var confList = [];        // 有效 confidence 值（Android 常缺，故只收 >0 的）
+  var lastLive = "";        // 最後一次含 interim 的完整文字（顯示＋兜底用）
 
   function notify(type, text){
     if(onStatus){ try{ onStatus(type, text); }catch(e){} }
@@ -678,35 +681,38 @@ function micFlow(onResult, onError, onStatus){
 
   var recorderStarted = false;
 
-  function joinSlots(finalOnly){
-    var parts = [];
-    for(var i = 0; i < resultSlots.length; i++){
-      var s = resultSlots[i];
-      if(!s || !s.text) continue;
-      if(finalOnly && !s.isFinal) continue;
-      parts.push(s.text);
+  function cleanWord(w){ return w.toLowerCase().replace(/[.,!?;:'"]/g, ""); }
+  // 把 addStr 合併進 baseWords：找 base 尾端與 add 開頭的最長重疊，只接上非重疊的新字。
+  // 遞增內容（"could I"⊇"could"）→ 重疊=整段舊內容 → 取代；獨立分段 → 重疊=0 → 直接接。
+  function mergeWords(baseWords, addStr){
+    var add = String(addStr || "").trim().split(/\s+/).filter(Boolean);
+    if(!add.length) return baseWords;
+    if(!baseWords.length) return add.slice();
+    var baseLow = baseWords.map(cleanWord);
+    var addLow = add.map(cleanWord);
+    var maxK = Math.min(baseWords.length, add.length);
+    var best = 0;
+    for(var k = maxK; k >= 1; k--){
+      var ok = true;
+      for(var j = 0; j < k; j++){
+        if(baseLow[baseWords.length - k + j] !== addLow[j]){ ok = false; break; }
+      }
+      if(ok){ best = k; break; }
     }
-    return parts.join(" ").replace(/\s+/g, " ").trim();
-  }
-  function hasAnyText(){
-    for(var i = 0; i < resultSlots.length; i++){
-      if(resultSlots[i] && resultSlots[i].text) return true;
-    }
-    return false;
+    return baseWords.concat(add.slice(best));
   }
   function combinedConfidence(){
-    // Android 常回傳 confidence 0 或缺值，只平均「真的有值」的 final 片段，都沒有就用中性值
-    var sum = 0, n = 0;
-    for(var i = 0; i < resultSlots.length; i++){
-      var s = resultSlots[i];
-      if(s && s.isFinal && typeof s.conf === "number" && s.conf > 0){ sum += s.conf; n++; }
-    }
-    return n ? (sum / n) : 0.75;
+    if(!confList.length) return 0.75;   // Android 常缺值 → 中性分，不當作發音差
+    var sum = 0;
+    for(var i = 0; i < confList.length; i++){ sum += confList[i]; }
+    return sum / confList.length;
   }
+  function hasContent(){ return committedWords.length > 0 || !!lastLive; }
   function deliver(){
     stopRecorderIfNeeded();
-    // 優先取已確認(final)內容；若使用者說完立刻放開、尚未 final 化，退回含 interim 的內容兜底
-    var text = joinSlots(true) || joinSlots(false);
+    // 以 final 為主；把最後的 interim 也去重合併進來（救回只出現在 interim 的尾字，如 please）
+    var finalWords = lastLive ? mergeWords(committedWords.slice(), lastLive) : committedWords.slice();
+    var text = finalWords.join(" ").trim();
     if(!text){
       finishOnce(function(){ onError("no-speech"); });
       return;
@@ -722,26 +728,31 @@ function micFlow(onResult, onError, onStatus){
   };
   recognizer.onresult = function(event){
     try{
-      // 依 result 的絕對索引「覆蓋」寫入：同一段語音無論被回報幾次都只占一個槽位，
-      // 因此 Android 反覆送來的遞增完整內容不會被重複串接。
+      // working 從已確認內容出發，逐一去重合併本次事件的每段（final 併入 committed，
+      // interim 只影響顯示與兜底、不污染 committed）。重疊去重讓遞增回報自動收斂。
+      var working = committedWords.slice();
       for(var i = event.resultIndex; i < event.results.length; i++){
         var res = event.results[i];
         var alt = res[0];
         if(!alt) continue;
-        resultSlots[i] = {
-          text: (alt.transcript || "").trim(),
-          conf: (typeof alt.confidence === "number") ? alt.confidence : 0,
-          isFinal: !!res.isFinal
-        };
+        var txt = (alt.transcript || "").trim();
+        if(!txt) continue;
+        if(res.isFinal){
+          committedWords = mergeWords(committedWords, txt);
+          if(typeof alt.confidence === "number" && alt.confidence > 0){ confList.push(alt.confidence); }
+          working = committedWords.slice();
+        } else {
+          working = mergeWords(working, txt);
+        }
       }
-      var live = joinSlots(false);
-      if(live) notify("interim", live);
+      lastLive = working.join(" ").trim();
+      if(lastLive) notify("interim", lastLive);
     }catch(e){}
   };
   recognizer.onerror = function(event){
     var err = event && event.error ? event.error : "unknown";
     // 已經收到內容的 no-speech / aborted 不算失敗，把內容交出去
-    if(hasAnyText() && (err === "no-speech" || err === "aborted")){
+    if(hasContent() && (err === "no-speech" || err === "aborted")){
       deliver();
       return;
     }

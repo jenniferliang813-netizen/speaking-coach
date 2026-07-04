@@ -32,7 +32,7 @@
 2. **Windows Chrome 常沒有 en-IE 語音** → App 已做退回 en-GB 的防線。改 TTS 相關功能時保留這個 fallback。
 3. **`webkitSpeechRecognition` 與 `MediaRecorder` 併用會搶麥克風**——Android 2026-07-03 實測「偶爾錄得到但部分缺失／顯示沒偵測到聲音」的根因之一 → 手機一律不啟動錄音（`isMobileDevice` 判斷），桌機保留辨識優先＋錯誤自動停用防線。
 5. **Android 對非連續辨識的停頓極敏感**（句中停一下就截斷）＋**啟動延遲會吃掉開頭幾個字**＋ **confidence 常回傳 0** → `micFlow` 已改連續模式（continuous + interimResults、onstart 才提示開始說話、conf 0 當缺值）。改辨識流程時不要退回單次模式。
-6. **連續模式下 Android 會反覆回報同一段的「遞增完整內容」**（"I"→"I have"→"I have a reservation"），若用 push 累積會串成 "I I have I have a reservation..." → `micFlow` 已改用 **result 絕對索引覆蓋**（`resultSlots[i]`）而非 push，同一段無論回報幾次只占一槽。deliver 優先取 final、沒 final 用 interim 兜底。不要改回 push。
+6. **連續模式下 Android 會把同一句的遞增內容分散在不同槽位反覆回報**（"could"→"could I"→"could I have"…），造成重複串接（"could could I could I have..."）。試過兩種無效解法：純拼接、result 索引覆蓋——都擋不住，因為 Android 這台把遞增版本放到**不同 index**。**最終有效解＝單字層級的前後重疊去重合併**（`mergeWords`：合併每段時找 base 尾與 add 頭的最長重疊，只接新增字）。committed 只吸收 final、interim 只影響顯示與兜底；deliver 把 lastLive 也 merge 進來救回只在 interim 的尾字（如 please）。改辨識流程時保留 mergeWords，別退回拼接/索引方案。驗證：`merge_test.js` 7 案例（Node 模擬，非實機）。
 4. 資料夾在 Google Drive 同步區 → 通用同步坑見 `~/.claude/PITFALLS.md`。
 
 ## 常用操作
