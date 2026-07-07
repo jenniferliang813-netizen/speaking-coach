@@ -72,7 +72,7 @@
 
 - [ ] 8 月起產題時加入愛爾蘭用語/腔調聽力元素（generate-week.md 已寫入此方向）
 - [ ] 難度 3 的題目要更貼近真實學術 Q&A（愈接近 9 月愈重要）
-- [ ] 方案 B（備選）：App 內建自由聊天模式接 Claude API——等使用者用過方案 A、確認喜歡這種教學再做
+- [ ] 方案 B：App 內建自由聊天模式接 Claude API。**2026-07-07 已討論，卡在使用者考慮 API 綁卡，她點頭後即可動工**。已決定的規格：①對話英文用 TTS 唸、語病糾正顯示成文字卡（中文解釋＋正確英文句），不打斷對話節奏；②聊滿 6 回合算完成當日練習（點亮 streak），wrap-up 總結存進歷史；③key 由使用者貼進設定頁、只存 localStorage（用 `anthropic-dangerous-direct-browser-access` header 直連 API，個人自用可接受）；④模型預設 claude-haiku-4-5（便宜快速，教練情境夠用）；⑤教練人設沿用 `prompts/free-talk-coach.md`。動工時注意：sw.js 的 fetch 攔截不能動到 api.anthropic.com 的 POST（Cache API 不能存 POST，會炸）。
 
 ## 測試 / 驗證（改 index.html 後必跑）
 
