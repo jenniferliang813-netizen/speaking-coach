@@ -25,6 +25,7 @@
 | `content/_weak.json` | 使用者從 App 匯出的弱點統計（可能不存在） |
 | `prompts/generate-week.md` | 每週產題 SOP（含難度規則、品質紅線） |
 | `prompts/deep-review.md` | 深度批改 SOP |
+| `prompts/free-talk-coach.md` | 自由聊天教練指令：貼進 Claude 手機 app 的專案指示，用語音模式自由對話＋即時抓語病 |
 
 ## 已踩過的坑（別再踩）
 
@@ -51,7 +52,11 @@
 - 每週產題：照 `prompts/generate-week.md` 全部步驟跑（讀 _used → 讀 _weak → 產 9-10 情境 → 封存舊檔 → 覆寫 current-week.js → 追加 _used.json → node --check）。
 - 深度批改：照 `prompts/deep-review.md`，逐字稿通常在 `C:\Users\jenni\Downloads\`。
 
-## 目前狀態（2026-07-04 快照）
+## 目前狀態（2026-07-07 快照）
+
+- 2026-07-07：使用者回饋「App 回答被要求得很制式、不像跟英文老師隨意聊天」。根因＝零 API 本地評分只能關鍵字比對，天生做不到自由對話。**已決策（方案 A）**：自由聊天走 Claude 手機 app 語音模式＋`prompts/free-talk-coach.md` 教練指令（貼進專案指示）；App 的結構化每日練習照舊保留（練句型熟練度，兩者互補）。若之後想把自由聊天整合進 App（接 Claude API、key 存 localStorage），是備選方案 B——先驗證 A 的教學體驗再說。
+
+## 先前狀態（2026-07-04 快照）
 
 - **✅ 全系統實機驗證通過（2026-07-04，使用者 Samsung Android + 桌面 PWA + 手機 Chrome 皆確認 v7 正常）**：收音、連續辨識、去重、計分、自動更新全部運作。目前版本 v7（APP_VERSION = sw CACHE = v7）。
 - 使用者已決策：完整鷹架（字幕+句型卡+提示鈕+慢速重播，WPM 目標 80–120）；加跟讀、streak、錄音回放、自動難度；腔調預設 en-GB、2026-08-01 起自動轉 en-IE（手動設定優先）；週日複習=重練本週最低分原情境。
@@ -67,6 +72,7 @@
 
 - [ ] 8 月起產題時加入愛爾蘭用語/腔調聽力元素（generate-week.md 已寫入此方向）
 - [ ] 難度 3 的題目要更貼近真實學術 Q&A（愈接近 9 月愈重要）
+- [ ] 方案 B（備選）：App 內建自由聊天模式接 Claude API——等使用者用過方案 A、確認喜歡這種教學再做
 
 ## 測試 / 驗證（改 index.html 後必跑）
 
